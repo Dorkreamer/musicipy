@@ -4,32 +4,70 @@ import requests
 import os
 import shutil
 import argparse
+import re
 
 def main(url=str,video_title=None,location=None):
-    # Step 1: Download Audio from YouTube
-    print("Fetching video information...")
-    video = YouTube(url)
-    audio_stream = video.streams.filter(only_audio=True).first()
-    print(f"Downloading \"{audio_stream.title}\"... [{round(int(audio_stream.filesize) / (1024 ** 2),2)}mb]")
-    audio_stream.download(output_path="temp", filename="music.mp3")
+    try:
+        #Get the real url in case it's going through a redirect
+        url = requests.get(args.url).url
 
-    # 1.5: Get Thumbnail
-    response = requests.get(video.thumbnail_url)
-    with open('temp/thumbnail.jpg', 'wb') as f:
-        f.write(response.content)
+        # Download Audio from YouTube
+        print("Fetching video information...")
+        video = YouTube(url)
+        audio_stream = video.streams.filter(only_audio=True).first()
+        print(f"Downloading \"{audio_stream.title}\"... [{round(int(audio_stream.filesize) / (1024 ** 2),2)}mb]")
+        audio_stream.download(output_path="temp", filename="music.mp3")
 
-    # Step 2: Combine Audio with Image using MoviePy
-    audio_clip = mp.AudioFileClip("temp/music.mp3")
-    image_clip = mp.ImageClip("temp/thumbnail.jpg").set_duration(audio_clip.duration)
-    final_clip = image_clip.set_audio(audio_clip)
-    if not video_title:
-        video_title = audio_stream.title
-    final_clip.write_videofile(f"{video_title}.mp4", codec="libx264", audio_codec="aac",fps=1)
-    
-    print("Cleaning up...")
-    shutil.rmtree("temp/")
+        # Download Thumbnail
+        response = requests.get(video.thumbnail_url)
+        if response.status_code == 200:
+            with open('temp/thumbnail.jpg', 'wb') as f:
+                f.write(response.content)
+        else:
+            print(f"Error! YouTube returned {response.status_code}")
+            a = input("Do you want to retry?")
+            if a.lower() == "y":
+                response = requests.get(video.thumbnail_url)
+                if response.status_code == 200:
+                    with open('temp/thumbnail.jpg', 'wb') as f:
+                        f.write(response.content)
+                else:
+                    print(f"Error downloading thumbnail, {response.status_code}")
+            else:
+                exit()
 
-    return f"{location}/{video_title}.mp4"
+        # Mash both together using MoviePy
+        audio_clip = mp.AudioFileClip("temp/music.mp3")
+        image_clip = mp.ImageClip("temp/thumbnail.jpg").set_duration(audio_clip.duration)
+        final_clip = image_clip.set_audio(audio_clip)
+        if not video_title:
+            video_title = audio_stream.title
+        
+        # Clean filename
+        video_title = re.sub(r'[\\/:*?"<>|]',"",video_title)
+
+        if not location:
+            location = os.getcwd()
+
+        final_clip.write_videofile(f"{location}/{video_title}.mp4", codec="libx264", audio_codec="aac",fps=1)
+        
+        #Cleans up
+        print("Cleaning up...")
+        shutil.rmtree("temp/")
+
+        #Returns the file path, for usage within scripts
+        return f"{location}/{video_title}.mp4"
+    except Exception as e:
+        print(e)
+        a = input("An error as occurred! Do you want to try again? ")
+        if a.lower() == "y":
+            try:
+                main(url,video_title,location)
+            except Exception as e:
+                print("An error has occurred, and musicipy cannot proceed...")
+                exit()
+        else:
+            exit()
 
 # Handle getting the filename and url from the user!
 if __name__ == "__main__":
